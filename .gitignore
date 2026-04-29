@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# Sensitive — DO NOT commit
+data/vetmarket.db
+data/session.json
+data/medimarket/
+data/exports/
+data/catalog/
+data/investigate/
+data/html/
+data/test_*.xlsx
+data/*.xlsx
+data/*.csv
+data/*.json
+
+# Keep the directory but not its contents
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

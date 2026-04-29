@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vetmarket vs Medi-Market Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --card: #1a2128;
+    --border: #2a3340;
+    --text: #e6e8eb;
+    --muted: #8a92a3;
+    --accent: #4a9eff;
+    --green: #2dd47e;
+    --green-bg: #143a26;
+    --red: #ff5a5a;
+    --red-bg: #3a1414;
+    --yellow: #f5b942;
+    --yellow-bg: #3a2e14;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+                 "Arial Hebrew", "Arial", sans-serif;
+    background: var(--bg); color: var(--text);
+    margin: 0; padding: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 24px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0; font-size: 20px; font-weight: 600;
+    color: var(--accent);
+  }
+  .stats {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    color: var(--muted); font-size: 13px;
+  }
+  .stats span b { color: var(--text); }
+
+  main { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+
+  .search-row {
+    display: flex; gap: 12px; align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .search-row input[type="text"] {
+    flex: 1; min-width: 280px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 15px;
+  }
+  .search-row input:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .toggle {
+    display: inline-flex; gap: 0;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .toggle button {
+    background: transparent;
+    border: none; color: var(--muted);
+    padding: 9px 16px; cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .toggle button.active {
+    background: var(--accent); color: white;
+  }
+  .toggle button:hover:not(.active) { background: rgba(74, 158, 255, 0.1); }
+
+  .btn {
+    background: var(--accent); color: white;
+    border: none; padding: 10px 16px; border-radius: 6px;
+    cursor: pointer; font-size: 14px;
+    font-family: inherit;
+  }
+  .btn:hover { background: #5fa9ff; }
+  .btn-secondary {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-secondary:hover { background: var(--border); }
+
+  .pane-wrapper {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr;
+  }
+  .pane-wrapper.both { grid-template-columns: 1fr 1fr; }
+
+  .pane {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .pane-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 600;
+  }
+  .pane-header .vm-tag { color: var(--accent); }
+  .pane-header .mm-tag { color: var(--yellow); }
+  .pane-header .count { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: var(--bg);
+    color: var(--muted);
+    font-weight: 500;
+    text-align: right;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+    font-size: 12px;
+  }
+  tbody td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tbody tr:hover { background: rgba(74, 158, 255, 0.05); }
+
+  .price-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .price-net { color: var(--muted); font-size: 11px; }
+
+  /* Color rows by cheaper-or-not */
+  tr.row-green { background: var(--green-bg); }
+  tr.row-red { background: var(--red-bg); }
+  tr.row-equal { background: var(--yellow-bg); }
+  tr.row-green:hover { background: #1a4a2f; }
+  tr.row-red:hover { background: #4a1a1a; }
+
+  .badge {
+    display: inline-block; padding: 1px 6px;
+    border-radius: 3px; font-size: 11px;
+    font-weight: 500;
+  }
+  .badge-green { background: var(--green); color: #051a0e; }
+  .badge-red { background: var(--red); color: #1a0505; }
+  .badge-equal { background: var(--yellow); color: #1a1305; }
+  .badge-active { background: var(--accent); color: white; }
+
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .compact-name {
+    max-width: 360px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 90vw; max-width: 1400px;
+    max-height: 85vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .modal-body { overflow-y: auto; padding: 0; }
+  .modal-close {
+    background: transparent; border: none;
+    color: var(--muted); font-size: 24px;
+    cursor: pointer; padding: 0 8px;
+  }
+
+  .small { font-size: 11px; color: var(--muted); }
+  .delta-pos { color: var(--green); }
+  .delta-neg { color: var(--red); }
+
+  details { margin: 8px 0; }
+  summary { cursor: pointer; color: var(--accent); user-select: none; }
+
+  .help {
+    color: var(--muted); font-size: 12px;
+    padding: 6px 10px;
+    background: rgba(245, 185, 66, 0.1);
+    border: 1px solid rgba(245, 185, 66, 0.3);
+    border-radius: 4px;
+    margin-bottom: 12px;
+  }
+
+  .filter-row {
+    display: flex; gap: 12px; align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .filter-row label {
+    font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .filter-row select {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border);
+    padding: 5px 8px; border-radius: 4px;
+    font-family: inherit; font-size: 13px;
+  }
+
+  .pagination {
+    display: flex; gap: 6px; align-items: center;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px;
+  }
+  .pagination button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 4px;
+    cursor: pointer; font-family: inherit;
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pagination button:not(:disabled):hover { background: var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐾 Vetmarket vs Medi-Market</h1>
+  <div class="stats" id="stats">טוען...</div>
+</header>
+
+<main>
+  <div class="search-row">
+    <input id="q" type="text" placeholder="חיפוש לפי שם בעברית/אנגלית או מק&quot;ט (ריק = עיון בכל הקטלוג)..." />
+    <div class="toggle" id="suppliers">
+      <button data-supplier="both" class="active">שניהם</button>
+      <button data-supplier="vetmarket">Vetmarket בלבד</button>
+      <button data-supplier="medimarket">Medi-Market בלבד</button>
+    </div>
+    <button class="btn" id="searchBtn">חפש / סנן</button>
+    <button class="btn btn-secondary" id="browseBtn">📖 עיון בכל הקטלוג</button>
+    <button class="btn btn-secondary" id="comparisonBtn">📊 כל ההשוואות</button>
+  </div>
+
+  <div class="filter-row">
+    <label>קטגוריה (Medi-Market):
+      <select id="categoryFilter">
+        <option value="">— הכל —</option>
+      </select>
+    </label>
+    <label>חומר פעיל (שניהם):
+      <select id="ingredientFilter">
+        <option value="">— הכל —</option>
+      </select>
+    </label>
+    <label>מיון לפי:
+      <select id="sortBy">
+        <option value="spend">הוצאה כוללת (VM)</option>
+        <option value="qty">כמות שנקנתה (VM)</option>
+        <option value="price">מחיר</option>
+        <option value="name">שם</option>
+      </select>
+    </label>
+    <label>סדר:
+      <select id="orderDir">
+        <option value="desc">↓ יורד</option>
+        <option value="asc">↑ עולה</option>
+      </select>
+    </label>
+    <label>עמוד:
+      <select id="pageSize">
+        <option>50</option>
+        <option>100</option>
+        <option>200</option>
+        <option>500</option>
+      </select>
+    </label>
+    <button class="btn btn-secondary" id="resetBtn">איפוס</button>
+  </div>
+
+  <div class="help" id="legend">
+    💡 שורות <b style="color:var(--green)">ירוקות</b> = הספק הזה זול יותר, <b style="color:var(--red)">אדומות</b> = יקר יותר.
+    אפשר להשאיר את שדה החיפוש ריק וסתם לעיין/למיין/לסנן. ההשוואה כוללת מע"מ 18%.
+  </div>
+
+  <div class="pane-wrapper both" id="panes">
+    <div class="pane" id="pane-vm">
+      <div class="pane-header">
+        <span class="vm-tag">🟦 Vetmarket</span>
+        <span class="count" id="count-vm"></span>
+      </div>
+      <div class="results-area" id="results-vm">
+        <div class="empty">חפשו מוצר כדי להתחיל</div>
+      </div>
+    </div>
+    <div class="pane" id="pane-mm">
+      <div class="pane-header">
+        <span class="mm-tag">🟨 Medi-Market</span>
+        <span class="count" id="count-mm"></span>
+      </div>
+      <div class="results-area" id="results-mm">
+        <div class="empty">חפשו מוצר כדי להתחיל</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Comparison modal -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <strong>השוואת מוצרים תואמים</strong>
+        <span class="small" id="modal-stats"></span>
+      </div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body">טוען...</div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+let supplierMode = "both";
+let currentPage = 1;
+let lastResponse = null;
+
+// --- Init ---
+async function init() {
+  // Stats
+  const r = await fetch('/api/stats');
+  const s = await r.json();
+  $('#stats').innerHTML = `
+    <span>Vetmarket: <b>${s.vetmarket_products}</b> מוצרים</span>
+    <span>הוצאה נטו 16 חודשים: <b>${(s.vetmarket_spend_net||0).toLocaleString('he-IL')} ₪</b></span>
+    <span>Medi-Market: <b>${s.medimarket_products}</b> מוצרים</span>
+  `;
+
+  // Categories
+  const cr = await fetch('/api/categories?supplier=medimarket');
+  const cd = await cr.json();
+  const cs = $('#categoryFilter');
+  for (const c of cd.categories) {
+    const opt = document.createElement('option');
+    opt.value = c.name;
+    opt.textContent = `${c.name} (${c.count})`;
+    cs.appendChild(opt);
+  }
+
+  // Ingredients
+  const ir = await fetch('/api/ingredients');
+  const id = await ir.json();
+  const isel = $('#ingredientFilter');
+  for (const ing of id.ingredients) {
+    const opt = document.createElement('option');
+    opt.value = ing;
+    opt.textContent = ing;
+    isel.appendChild(opt);
+  }
+
+  // Supplier toggle
+  $$('#suppliers button').forEach(b => {
+    b.onclick = () => {
+      $$('#suppliers button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      supplierMode = b.dataset.supplier;
+      $('#panes').classList.toggle('both', supplierMode === 'both');
+      $('#pane-vm').style.display = supplierMode !== 'medimarket' ? '' : 'none';
+      $('#pane-mm').style.display = supplierMode !== 'vetmarket' ? '' : 'none';
+      currentPage = 1;
+      doSearch();
+    };
+  });
+
+  // Enter on input
+  $('#q').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { currentPage = 1; doSearch(); }
+  });
+
+  // Filter changes → re-fetch immediately
+  ['#categoryFilter', '#ingredientFilter', '#sortBy', '#orderDir', '#pageSize'].forEach(sel => {
+    $(sel).addEventListener('change', () => { currentPage = 1; doSearch(); });
+  });
+
+  $('#searchBtn').onclick = () => { currentPage = 1; doSearch(); };
+  $('#browseBtn').onclick = () => {
+    $('#q').value = '';
+    currentPage = 1;
+    doSearch();
+  };
+  $('#resetBtn').onclick = () => {
+    $('#q').value = '';
+    $('#categoryFilter').value = '';
+    $('#ingredientFilter').value = '';
+    $('#sortBy').value = 'spend';
+    $('#orderDir').value = 'desc';
+    $('#pageSize').value = '50';
+    currentPage = 1;
+    doSearch();
+  };
+  $('#comparisonBtn').onclick = openComparisons;
+
+  // Initial load — show top-spend Vetmarket items + MM popular
+  doSearch();
+}
+
+// --- Search / Browse (unified) ---
+async function doSearch() {
+  const q = $('#q').value.trim();
+  const cat = $('#categoryFilter').value;
+  const ing = $('#ingredientFilter').value;
+  const sort_by = $('#sortBy').value;
+  const order = $('#orderDir').value;
+  const page_size = $('#pageSize').value;
+
+  // If nothing entered AND no filter, prompt
+  if (!q && !cat && !ing && supplierMode === 'both') {
+    // fallthrough — show top-N by selected sort
+  }
+
+  const params = new URLSearchParams({
+    q, supplier: supplierMode,
+    sort_by, order,
+    category: cat,
+    ingredient: ing,
+    page: currentPage,
+    page_size,
+  });
+  const r = await fetch(`/api/search?${params}`);
+  const data = await r.json();
+  lastResponse = data;
+  renderVM(data.vetmarket);
+  renderMM(data.medimarket);
+  renderPagination();
+}
+
+function renderPagination() {
+  if (!lastResponse) return;
+  const data = lastResponse;
+  const ps = parseInt(data.page_size, 10);
+
+  function makePager(total, label, supplier) {
+    if (!total) return '';
+    const totalPages = Math.max(1, Math.ceil(total / ps));
+    const showFrom = (currentPage - 1) * ps + 1;
+    const showTo = Math.min(currentPage * ps, total);
+    return `<div class="pagination">
+      <button ${currentPage <= 1 ? 'disabled' : ''} onclick="goPage(${currentPage - 1})">← הקודם</button>
+      <span>עמוד <b>${currentPage}</b> / ${totalPages} | מציג ${showFrom}-${showTo} מתוך ${total}</span>
+      <button ${currentPage >= totalPages ? 'disabled' : ''} onclick="goPage(${currentPage + 1})">הבא →</button>
+    </div>`;
+  }
+
+  // Append pagination to each pane
+  const pagerVM = makePager(data.vetmarket_total, 'VM', 'vetmarket');
+  const pagerMM = makePager(data.medimarket_total, 'MM', 'medimarket');
+  if (pagerVM && data.vetmarket.length) {
+    $('#results-vm').insertAdjacentHTML('beforeend', pagerVM);
+  }
+  if (pagerMM && data.medimarket.length) {
+    $('#results-mm').insertAdjacentHTML('beforeend', pagerMM);
+  }
+}
+
+window.goPage = function(p) {
+  currentPage = p;
+  doSearch();
+};
+
+function renderVM(items) {
+  $('#count-vm').textContent = `${items.length} תוצאות`;
+  if (!items.length) {
+    $('#results-vm').innerHTML = '<div class="empty">לא נמצא</div>';
+    return;
+  }
+  let h = `<table><thead><tr>
+    <th>מק"ט</th><th>שם</th><th>כמות שנקנתה</th>
+    <th>מחיר נטו</th><th>מחיר ברוטו</th>
+    <th>MM מקביל ברוטו</th><th>הפרש</th>
+  </tr></thead><tbody>`;
+  for (const it of items) {
+    const row_cls = it.color ? `row-${it.color}` : '';
+    const delta = (it.other_supplier_price && it.price_gross) ?
+      ((it.price_gross - it.other_supplier_price) / it.other_supplier_price * 100) : null;
+    const deltaTxt = delta === null ? '—' :
+      `<span class="${delta < 0 ? 'delta-pos' : 'delta-neg'}">${delta > 0 ? '+' : ''}${delta.toFixed(1)}%</span>`;
+    h += `<tr class="${row_cls}">
+      <td>${it.sku}</td>
+      <td><div class="compact-name">${escape(it.name)}</div>
+          ${it.other_supplier_name ? `<div class="small">↔ MM: ${escape(it.other_supplier_name).slice(0,80)}</div>` : ''}</td>
+      <td>${it.total_qty || '—'}</td>
+      <td class="price-cell"><span class="price-net">${it.price_net?.toLocaleString('he-IL') || '—'} ₪</span></td>
+      <td class="price-cell">${it.price_gross?.toLocaleString('he-IL') || '—'} ₪</td>
+      <td class="price-cell">${it.other_supplier_price ? it.other_supplier_price.toLocaleString('he-IL') + ' ₪' : '—'}</td>
+      <td class="price-cell">${deltaTxt}</td>
+    </tr>`;
+  }
+  h += '</tbody></table>';
+  $('#results-vm').innerHTML = h;
+}
+
+function renderMM(items) {
+  $('#count-mm').textContent = `${items.length} תוצאות`;
+  if (!items.length) {
+    $('#results-mm').innerHTML = '<div class="empty">לא נמצא</div>';
+    return;
+  }
+  let h = `<table><thead><tr>
+    <th>מק"ט</th><th>שם</th>
+    <th>מחיר ברוטו</th><th>מחיר נטו</th>
+    <th>VM מקביל ברוטו</th><th>הפרש</th>
+    <th></th>
+  </tr></thead><tbody>`;
+  for (const it of items) {
+    const row_cls = it.color ? `row-${it.color}` : '';
+    const delta = (it.other_supplier_price && it.price_gross) ?
+      ((it.price_gross - it.other_supplier_price) / it.other_supplier_price * 100) : null;
+    const deltaTxt = delta === null ? '—' :
+      `<span class="${delta < 0 ? 'delta-pos' : 'delta-neg'}">${delta > 0 ? '+' : ''}${delta.toFixed(1)}%</span>`;
+    h += `<tr class="${row_cls}">
+      <td>${it.sku || '—'}</td>
+      <td><div class="compact-name">${escape(it.name)}</div>
+          ${it.other_supplier_name ? `<div class="small">↔ VM: ${escape(it.other_supplier_name).slice(0,80)}</div>` : ''}</td>
+      <td class="price-cell">${it.price_gross.toLocaleString('he-IL')} ₪</td>
+      <td class="price-cell"><span class="price-net">${it.price_net?.toLocaleString('he-IL') || '—'} ₪</span></td>
+      <td class="price-cell">${it.other_supplier_price ? it.other_supplier_price.toLocaleString('he-IL') + ' ₪' : '—'}</td>
+      <td class="price-cell">${deltaTxt}</td>
+      <td>${it.permalink ? `<a href="${it.permalink}" target="_blank" style="color:var(--accent)">↗</a>` : ''}</td>
+    </tr>`;
+  }
+  h += '</tbody></table>';
+  $('#results-mm').innerHTML = h;
+}
+
+function escape(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// --- Comparisons modal ---
+async function openComparisons() {
+  $('#modal').classList.add('show');
+  $('#modal-body').innerHTML = '<div class="empty">טוען...</div>';
+  const r = await fetch('/api/comparison?from=2025-01-01&sort_by=savings&limit=200');
+  const data = await r.json();
+  const s = data.stats;
+  $('#modal-stats').textContent =
+    ` — ${s.matches} התאמות | חיסכון פוטנציאלי: ${s.potential_annual_savings.toLocaleString('he-IL')} ₪/שנה`;
+  let h = `<div style="padding:12px 20px; color:var(--muted); font-size:13px;">
+    מיון לפי חיסכון שנתי. ירוק = MM זול → חיסכון אם נעבור.
+    אדום = VM זול → להישאר אצלם. <b>שים לב</b>: ההתאמה לפי חומר פעיל ומינון, לא תמיד זהה ב-form ובאריזה.
+  </div>`;
+  h += `<table><thead><tr>
+    <th>חומר פעיל</th><th>מינון (mg)</th><th>אריזה</th>
+    <th>Vetmarket</th><th>VM ברוטו</th>
+    <th>Medi-Market</th><th>MM ברוטו</th>
+    <th>הפרש %</th><th>זול ב</th><th>חיסכון שנתי ₪</th><th>סוג התאמה</th>
+  </tr></thead><tbody>`;
+  for (const r of data.rows) {
+    const cls = r.cheaper_at === 'medimarket' ? 'row-green' :
+                r.cheaper_at === 'vetmarket' ? 'row-red' : 'row-equal';
+    h += `<tr class="${cls}">
+      <td>${r.active_ingredient || '—'}</td>
+      <td>${r.dosage_mg || '—'}</td>
+      <td>${r.pack_size || '—'}</td>
+      <td><div class="compact-name">${escape(r.vetmarket_name)}</div></td>
+      <td class="price-cell">${r.vetmarket_avg_gross.toLocaleString('he-IL')}</td>
+      <td><div class="compact-name">${escape(r.medimarket_name)}</div></td>
+      <td class="price-cell">${r.medimarket_price.toLocaleString('he-IL')}</td>
+      <td class="price-cell ${r.delta_pct < 0 ? 'delta-pos' : 'delta-neg'}">${r.delta_pct > 0 ? '+' : ''}${r.delta_pct.toFixed(1)}%</td>
+      <td>${r.cheaper_at === 'medimarket' ? '🟢 MM' : (r.cheaper_at === 'vetmarket' ? '🔴 VM' : '=')}</td>
+      <td class="price-cell"><b>${r.annual_savings_if_switched > 0 ? '+' : ''}${r.annual_savings_if_switched.toLocaleString('he-IL', {maximumFractionDigits:0})}</b></td>
+      <td><span class="small">${r.match_type}</span></td>
+    </tr>`;
+  }
+  h += '</tbody></table>';
+  $('#modal-body').innerHTML = h;
+}
+
+function closeModal() { $('#modal').classList.remove('show'); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+init();
+</script>
+</body>
+</html>
