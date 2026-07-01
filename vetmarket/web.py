@@ -6,12 +6,14 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+import hashlib
+
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db, compare as compare_mod
-from .config import DATA_DIR
+from .config import DATA_DIR, DASHBOARD_PIN
 
 app = FastAPI(title="Vetmarket Dashboard")
 
@@ -20,6 +22,56 @@ STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 MEDIMARKET_DB = DATA_DIR / "medimarket" / "prices.db"
+
+
+# ---------- PIN gate (same convention as Gil's other portals) ----------
+
+_AUTH_COOKIE = "vm_auth"
+# Cookie value is a stable token derived from the PIN — not the raw PIN, so the
+# code itself isn't sitting readable in the cookie jar.
+_AUTH_TOKEN = hashlib.sha256(f"vetmarket-dash::{DASHBOARD_PIN}".encode()).hexdigest()[:32]
+
+_LOGIN_HTML = """<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>כניסה — Vetmarket Dashboard</title>
+<style>body{background:#0f1419;color:#e6e8eb;font-family:-apple-system,"Segoe UI",Arial,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.box{background:#1a2128;border:1px solid #2a3340;border-radius:10px;padding:32px;width:280px;text-align:center}
+h1{font-size:18px;color:#4a9eff;margin:0 0 18px}
+input{width:100%;box-sizing:border-box;background:#0f1419;border:1px solid #2a3340;color:#e6e8eb;
+font-size:22px;text-align:center;letter-spacing:6px;padding:12px;border-radius:6px;margin-bottom:12px}
+button{width:100%;background:#4a9eff;color:#fff;border:0;padding:12px;border-radius:6px;font-size:15px;cursor:pointer}
+.err{color:#ff5a5a;font-size:13px;min-height:18px;margin-bottom:6px}</style></head>
+<body><form class="box" method="post" action="/login">
+<h1>🐾 Vetmarket Dashboard</h1><div class="err">__ERR__</div>
+<input name="pin" type="password" inputmode="numeric" autocomplete="off" autofocus placeholder="PIN">
+<button>כניסה</button></form></body></html>"""
+
+
+@app.middleware("http")
+async def _pin_gate(request: Request, call_next):
+    path = request.url.path
+    if path == "/login":
+        return await call_next(request)
+    if request.cookies.get(_AUTH_COOKIE) == _AUTH_TOKEN:
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return HTMLResponse(_LOGIN_HTML.replace("__ERR__", ""), status_code=401)
+
+
+@app.post("/login")
+async def login(request: Request):
+    # Parse the urlencoded body by hand to avoid a python-multipart dependency.
+    from urllib.parse import parse_qs
+    body = (await request.body()).decode("utf-8", "ignore")
+    pin = (parse_qs(body).get("pin", [""])[0] or "").strip()
+    if pin == DASHBOARD_PIN:
+        resp = RedirectResponse(url="/", status_code=303)
+        resp.set_cookie(_AUTH_COOKIE, _AUTH_TOKEN, httponly=True,
+                        max_age=60 * 60 * 24 * 30, samesite="lax")
+        return resp
+    return HTMLResponse(_LOGIN_HTML.replace("__ERR__", "PIN שגוי"), status_code=401)
 
 
 # ---------- helpers ----------
@@ -37,43 +89,58 @@ _MM_SORT_COLS = {
 }
 
 
+# Basis for Vetmarket invoice pricing: the last N invoices per product.
+# The list price (מחירון) is ALWAYS the latest invoice's unit price, so a price
+# change shows the current price, never a stale/averaged one. The avg is the
+# weighted mean actually paid across those last N invoices.
+VM_N_INVOICES = 12
+
+# sort_by -> key in the invoice_price_table row dict
+_VM_SORT_KEYS = {
+    "name": "name", "price": "avg_gross", "spend": "total_net", "qty": "total_qty",
+}
+
+
 def _vetmarket_search(q: str = "", limit: int = 100, offset: int = 0,
                       sort_by: str = "spend", order: str = "desc") -> list[dict]:
-    """Search/browse Vetmarket products in purchases_summary (the catalog) — net prices."""
-    sort_col = _VM_SORT_COLS.get(sort_by, "ps.total_amount")
-    order_sql = "ASC" if order.lower() == "asc" else "DESC"
-    where_clauses = []
-    params: list = []
-    if q:
-        where_clauses.append("(ps.name LIKE ? OR ps.sku LIKE ?)")
-        params.extend([f"%{q}%", f"%{q}%"])
-    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-    sql = f"""
-        SELECT
-            ps.sku, ps.name, ps.total_qty, ps.total_amount,
-            ps.avg_unit_price AS price_net,
-            ROUND(ps.avg_unit_price * 1.18, 2) AS price_gross,
-            ps.period_from, ps.period_to
-        FROM purchases_summary ps
-        {where_sql}
-        ORDER BY {sort_col} {order_sql} NULLS LAST
-        LIMIT ? OFFSET ?
+    """Vetmarket pricing from the Yahoo order-confirmation invoices (FRESH source).
+
+    Each row carries BOTH:
+      - list_gross : מחירון — unit price on the latest invoice (before bonus/discount)
+      - avg_gross  : מחיר ממוצע משוקלל — effectively paid over the last N invoices
+      - total_gross: סה"כ עלות — total spend on the item across those N invoices
+      - n_orders   : how many invoices backed the number (basis = last N invoices)
+    price_gross/price_net mirror the weighted-avg so cross-supplier compare keeps working.
     """
-    with db.cursor() as c:
-        rows = c.execute(sql, (*params, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+    from . import reports
+    rows = reports.invoice_price_table(n_invoices=VM_N_INVOICES, q=q, limit=100000)
+    key = _VM_SORT_KEYS.get(sort_by, "total_net")
+    rows.sort(key=lambda r: (r.get(key) is None, r.get(key) or 0),
+              reverse=(order.lower() == "desc"))
+    page = rows[offset:offset + limit]
+    out = []
+    for r in page:
+        out.append({
+            "sku": r["sku"],
+            "name": r["name"],
+            "total_qty": r["total_qty"],
+            "n_orders": r["n_orders"],
+            "last_date": r["last_date"],
+            "list_gross": r["list_gross"],          # מחירון
+            "avg_gross": r["avg_gross"],            # ממוצע משוקלל
+            "total_gross": r["total_gross"],        # סה"כ עלות (ברוטו)
+            "discount_pct": r["discount_pct"],
+            "basis": "invoices",                    # תמחור מחשבוניות
+            "n_invoices_basis": VM_N_INVOICES,      # מבוסס על 12 חשבוניות אחרונות
+            "price_gross": r["avg_gross"],          # legacy + cross-compare anchor
+            "price_net": r["avg_net"],
+        })
+    return out
 
 
 def _vetmarket_count(q: str = "") -> int:
-    where_sql = ""
-    params = []
-    if q:
-        where_sql = "WHERE (name LIKE ? OR sku LIKE ?)"
-        params = [f"%{q}%", f"%{q}%"]
-    with db.cursor() as c:
-        return c.execute(
-            f"SELECT COUNT(*) FROM purchases_summary {where_sql}", params
-        ).fetchone()[0]
+    from . import reports
+    return len(reports.invoice_price_table(n_invoices=VM_N_INVOICES, q=q, limit=100000))
 
 
 def _medimarket_search(q: str = "", limit: int = 100, offset: int = 0,
@@ -97,8 +164,12 @@ def _medimarket_search(q: str = "", limit: int = 100, offset: int = 0,
         params.append(f"%{category}%")
     where_sql = "WHERE " + " AND ".join(where)
     sql = f"""
-        SELECT sku, name, price AS price_gross,
+        SELECT sku, name,
+               price AS price_gross,
                ROUND(price / 1.18, 2) AS price_net,
+               regular_price AS list_gross,   -- מחירון (לפני מבצע)
+               sale_price,                    -- מחיר מבצע (אם on_sale)
+               on_sale,
                permalink, in_stock, categories
         FROM products
         {where_sql}
@@ -107,7 +178,21 @@ def _medimarket_search(q: str = "", limit: int = 100, offset: int = 0,
     """
     rows = conn.execute(sql, (*params, limit, offset)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        # discount = how far below list the current price sits
+        lp, pg = d.get("list_gross"), d.get("price_gross")
+        try:
+            lp = float(lp) if lp not in (None, "", 0, "0") else None
+        except (TypeError, ValueError):
+            lp = None
+        d["list_gross"] = lp
+        d["discount_pct"] = (round((lp - pg) / lp * 100, 1)
+                             if lp and pg and lp > pg else None)
+        d["basis"] = "site"   # מחירון אתר — לא מחשבוניות (אין רכש שמור למדימרקט)
+        out.append(d)
+    return out
 
 
 def _medimarket_count(q: str = "", category: str | None = None) -> int:
@@ -368,13 +453,10 @@ def api_comparison(
 @app.get("/api/stats")
 def api_stats():
     """Top-line numbers for the dashboard banner."""
-    with db.cursor() as c:
-        n_v = c.execute(
-            "SELECT COUNT(DISTINCT sku) FROM purchases_summary"
-        ).fetchone()[0]
-        v_total = c.execute(
-            "SELECT SUM(total_amount) FROM purchases_summary"
-        ).fetchone()[0] or 0
+    from . import reports
+    vm_rows = reports.invoice_price_table(n_invoices=VM_N_INVOICES, limit=100000)
+    n_v = len(vm_rows)
+    v_total = sum(r.get("total_net") or 0 for r in vm_rows)
 
     n_m = 0
     if MEDIMARKET_DB.exists():
@@ -387,7 +469,10 @@ def api_stats():
     return {
         "vetmarket_products": n_v,
         "vetmarket_spend_net": round(v_total, 2),
+        "vetmarket_spend_gross": round(v_total * 1.18, 2),
+        "vetmarket_basis_invoices": VM_N_INVOICES,
         "medimarket_products": n_m,
+        "last_updated": reports.last_updated(),
     }
 
 

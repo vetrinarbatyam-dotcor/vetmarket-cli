@@ -350,15 +350,34 @@ let supplierMode = "both";
 let currentPage = 1;
 let lastResponse = null;
 
+// --- Freshness banner (עודכן לאחרונה) ---
+function _fmtDate(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso.replace(' ', 'T'));
+    return d.toLocaleDateString('he-IL', {day:'2-digit', month:'2-digit', year:'numeric'});
+  } catch (e) { return iso; }
+}
+function renderFreshness(lu) {
+  if (!lu) return '';
+  const vmAge = lu.vetmarket_age_days;
+  const stale = (vmAge != null && vmAge > 40);
+  const color = stale ? 'var(--red)' : 'var(--green)';
+  const warn = stale ? ` ⚠️ ישן (${vmAge} ימים)` : '';
+  return `<span style="color:${color}; font-weight:600;" title="Vetmarket: ${lu.vetmarket||'—'} | Medi-Market: ${lu.medimarket||'—'}">
+    🕒 עודכן לאחרונה: ${_fmtDate(lu.vetmarket)}${warn}</span>`;
+}
+
 // --- Init ---
 async function init() {
   // Stats
   const r = await fetch('/api/stats');
   const s = await r.json();
   $('#stats').innerHTML = `
-    <span>Vetmarket: <b>${s.vetmarket_products}</b> מוצרים</span>
-    <span>הוצאה נטו 16 חודשים: <b>${(s.vetmarket_spend_net||0).toLocaleString('he-IL')} ₪</b></span>
-    <span>Medi-Market: <b>${s.medimarket_products}</b> מוצרים</span>
+    <span>Vetmarket: <b>${s.vetmarket_products}</b> מק"טים (על פי ${s.vetmarket_basis_invoices||12} חשבוניות אחרונות למוצר)</span>
+    <span>סה"כ עלות פריטים ברוטו: <b>${(s.vetmarket_spend_gross||0).toLocaleString('he-IL')} ₪</b> <span class="small">(נטו ${(s.vetmarket_spend_net||0).toLocaleString('he-IL')} ₪)</span></span>
+    <span>Medi-Market: <b>${s.medimarket_products}</b> מוצרים <span class="small">(מחירון אתר)</span></span>
+    ${renderFreshness(s.last_updated)}
   `;
 
   // Categories
@@ -425,8 +444,9 @@ async function init() {
   };
   $('#comparisonBtn').onclick = openComparisons;
 
-  // Initial load — show top-spend Vetmarket items + MM popular
+  // Initial load — פותחים ישר את ההשוואה (זה מה שמעניין), הקטלוג ברקע
   doSearch();
+  openComparisons();
 }
 
 // --- Search / Browse (unified) ---
@@ -498,9 +518,10 @@ function renderVM(items) {
     $('#results-vm').innerHTML = '<div class="empty">לא נמצא</div>';
     return;
   }
-  let h = `<table><thead><tr>
-    <th>מק"ט</th><th>שם</th><th>כמות שנקנתה</th>
-    <th>מחיר נטו</th><th>מחיר ברוטו</th>
+  let h = `<div class="small" style="margin-bottom:6px">📄 מקור מחיר: <b>12 חשבוניות אחרונות לכל מוצר</b> (מייל Yahoo). מחירון = מחיר היחידה בחשבונית האחרונה.</div>
+  <table><thead><tr>
+    <th>מק"ט</th><th>שם</th><th>כמות</th><th>חשבוניות</th>
+    <th>מחירון ברוטו</th><th>ממוצע ששולם ברוטו</th><th>סה"כ עלות ברוטו</th><th>הנחה אפקטיבית</th>
     <th>MM מקביל ברוטו</th><th>הפרש</th>
   </tr></thead><tbody>`;
   for (const it of items) {
@@ -509,13 +530,22 @@ function renderVM(items) {
       ((it.price_gross - it.other_supplier_price) / it.other_supplier_price * 100) : null;
     const deltaTxt = delta === null ? '—' :
       `<span class="${delta < 0 ? 'delta-pos' : 'delta-neg'}">${delta > 0 ? '+' : ''}${delta.toFixed(1)}%</span>`;
+    const disc = (it.discount_pct && it.discount_pct > 0)
+      ? `<span class="delta-pos">−${it.discount_pct}%</span>` : '—';
+    const nInv = it.n_orders || 0;
+    const invTxt = nInv
+      ? `<span title="הממוצע מבוסס על ${nInv} חשבוניות אחרונות">${nInv}${nInv >= (it.n_invoices_basis||12) ? '' : ' <span class="small">(כל מה שיש)</span>'}</span>`
+      : '—';
     h += `<tr class="${row_cls}">
       <td>${it.sku}</td>
       <td><div class="compact-name">${escape(it.name)}</div>
           ${it.other_supplier_name ? `<div class="small">↔ MM: ${escape(it.other_supplier_name).slice(0,80)}</div>` : ''}</td>
       <td>${it.total_qty || '—'}</td>
-      <td class="price-cell"><span class="price-net">${it.price_net?.toLocaleString('he-IL') || '—'} ₪</span></td>
-      <td class="price-cell">${it.price_gross?.toLocaleString('he-IL') || '—'} ₪</td>
+      <td>${invTxt}</td>
+      <td class="price-cell">${it.list_gross?.toLocaleString('he-IL') || '—'} ₪</td>
+      <td class="price-cell"><b>${it.avg_gross?.toLocaleString('he-IL') || '—'} ₪</b></td>
+      <td class="price-cell">${it.total_gross?.toLocaleString('he-IL') || '—'} ₪</td>
+      <td class="price-cell">${disc}</td>
       <td class="price-cell">${it.other_supplier_price ? it.other_supplier_price.toLocaleString('he-IL') + ' ₪' : '—'}</td>
       <td class="price-cell">${deltaTxt}</td>
     </tr>`;
@@ -530,9 +560,10 @@ function renderMM(items) {
     $('#results-mm').innerHTML = '<div class="empty">לא נמצא</div>';
     return;
   }
-  let h = `<table><thead><tr>
+  let h = `<div class="small" style="margin-bottom:6px">🌐 מקור מחיר: <b>מחירון אתר</b> (Medi-Market אונליין) — לא מחשבוניות. אין נתוני רכש/כמויות למדימרקט.</div>
+  <table><thead><tr>
     <th>מק"ט</th><th>שם</th>
-    <th>מחיר ברוטו</th><th>מחיר נטו</th>
+    <th>מחירון ברוטו</th><th>מחיר נוכחי ברוטו</th><th>מבצע</th>
     <th>VM מקביל ברוטו</th><th>הפרש</th>
     <th></th>
   </tr></thead><tbody>`;
@@ -542,12 +573,17 @@ function renderMM(items) {
       ((it.price_gross - it.other_supplier_price) / it.other_supplier_price * 100) : null;
     const deltaTxt = delta === null ? '—' :
       `<span class="${delta < 0 ? 'delta-pos' : 'delta-neg'}">${delta > 0 ? '+' : ''}${delta.toFixed(1)}%</span>`;
+    const onSale = Number(it.on_sale) === 1 || (it.discount_pct && it.discount_pct > 0);
+    const disc = (it.discount_pct && it.discount_pct > 0)
+      ? `<span class="delta-pos">−${it.discount_pct}%</span>` : '—';
+    const listTxt = it.list_gross ? it.list_gross.toLocaleString('he-IL') + ' ₪' : '—';
     h += `<tr class="${row_cls}">
       <td>${it.sku || '—'}</td>
       <td><div class="compact-name">${escape(it.name)}</div>
           ${it.other_supplier_name ? `<div class="small">↔ VM: ${escape(it.other_supplier_name).slice(0,80)}</div>` : ''}</td>
-      <td class="price-cell">${it.price_gross.toLocaleString('he-IL')} ₪</td>
-      <td class="price-cell"><span class="price-net">${it.price_net?.toLocaleString('he-IL') || '—'} ₪</span></td>
+      <td class="price-cell">${onSale ? '<s>'+listTxt+'</s>' : listTxt}</td>
+      <td class="price-cell"><b>${it.price_gross.toLocaleString('he-IL')} ₪</b></td>
+      <td class="price-cell">${disc}</td>
       <td class="price-cell">${it.other_supplier_price ? it.other_supplier_price.toLocaleString('he-IL') + ' ₪' : '—'}</td>
       <td class="price-cell">${deltaTxt}</td>
       <td>${it.permalink ? `<a href="${it.permalink}" target="_blank" style="color:var(--accent)">↗</a>` : ''}</td>

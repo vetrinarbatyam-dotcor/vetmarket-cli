@@ -28,3 +28,12 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/126.0.0.0 Safari/537.36"
 )
+
+# Israeli VAT multiplier (net -> gross). Single source of truth.
+VAT_RATE = float(os.getenv("VM_VAT_RATE", "1.18"))
+
+# Dashboard access PIN (same convention as Gil's other portals). Override via env.
+DASHBOARD_PIN = os.getenv("VM_DASHBOARD_PIN", "112026")
+
+# Warn if data is older than this many days (staleness banner + alerts).
+STALE_AFTER_DAYS = int(os.getenv("VM_STALE_AFTER_DAYS", "40"))

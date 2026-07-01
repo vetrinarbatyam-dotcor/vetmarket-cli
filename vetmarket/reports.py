@@ -1,6 +1,5 @@
 """Analytics queries against the local DB."""
 from __future__ import annotations
-from datetime import datetime, timedelta
 from . import db
 
 
@@ -47,6 +46,66 @@ def invoice_lines(invoice_id: str) -> list[dict]:
             "FROM invoice_lines WHERE invoice_id = ?", (invoice_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def invoice_price_table(n_invoices: int = 12, q: str = "",
+                        limit: int = 500, offset: int = 0) -> list[dict]:
+    """Per-SKU pricing from the Yahoo order-confirmation invoices (the FRESH source).
+
+    Basis = the **last `n_invoices` invoices per product** (not a calendar window).
+    For each SKU we rank its invoice observations newest-first and keep the top N:
+    - list price  = unit price on the *latest* invoice for the SKU (catalog price,
+                    before any quantity bonus / effective discount)
+    - avg  price  = Σ(unit*qty) / Σ(qty) over those last N invoices (effectively paid)
+    - total cost  = Σ(unit*qty) over those last N invoices (total spend on the item)
+    - n_orders    = how many invoices actually backed the number (≤ N)
+
+    All prices are NET; gross = ×1.18. discount_pct = (list-avg)/list*100.
+    """
+    where = ["r.rn <= ?"]
+    params: list = [n_invoices]
+    if q:
+        where.append("(r.sku LIKE ? OR r.notes LIKE ?)")
+        params += [f"%{q}%", f"%{q}%"]
+    where_sql = " AND ".join(where)
+    sql = f"""
+        WITH ranked AS (
+            SELECT p.sku, p.unit_price, p.qty, p.observed_date, p.source_id,
+                   p.notes, p.id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY p.sku
+                       ORDER BY p.observed_date DESC, p.id DESC
+                   ) AS rn
+            FROM prices p
+            WHERE p.source='invoice'
+        )
+        SELECT r.sku AS sku,
+            (SELECT notes FROM ranked rn1 WHERE rn1.sku=r.sku AND rn1.rn=1) AS name,
+            (SELECT unit_price FROM ranked rn2 WHERE rn2.sku=r.sku AND rn2.rn=1) AS list_net,
+            ROUND(SUM(r.unit_price*COALESCE(r.qty,0))/NULLIF(SUM(r.qty),0),4) AS avg_net,
+            ROUND(SUM(r.unit_price*COALESCE(r.qty,0)),2) AS total_net,
+            SUM(r.qty) AS total_qty,
+            MAX(r.observed_date) AS last_date,
+            COUNT(DISTINCT r.source_id) AS n_orders
+        FROM ranked r
+        WHERE {where_sql}
+        GROUP BY r.sku
+        ORDER BY total_net DESC
+        LIMIT ? OFFSET ?
+    """
+    params += [limit, offset]
+    with db.cursor() as c:
+        rows = c.execute(sql, params).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        ln, an, tn = d.get("list_net"), d.get("avg_net"), d.get("total_net")
+        d["list_gross"] = round(ln * 1.18, 2) if ln else None
+        d["avg_gross"] = round(an * 1.18, 2) if an else None
+        d["total_gross"] = round(tn * 1.18, 2) if tn else None
+        d["discount_pct"] = round((ln - an) / ln * 100, 1) if ln and an else None
+        out.append(d)
+    return out
 
 
 def search_products(q: str, limit: int = 20) -> list[dict]:
@@ -248,4 +307,46 @@ def status_summary() -> dict:
         "shipping_docs": ns,
         "price_offers": npo,
         "last_sync": [dict(r) for r in last_sync],
+    }
+
+
+def last_updated() -> dict:
+    """When did each price source last refresh — for the dashboard staleness banner.
+
+    Vetmarket freshness = newest invoice fetched_at (the monthly cron writes it,
+    yahoo_invoices.store). Medi-Market freshness = mtime of its scraped prices.db.
+    Returns ISO strings (or None) plus age_days so the UI can flag stale data.
+    """
+    import datetime
+    from .config import DATA_DIR
+
+    with db.cursor() as c:
+        vm_inv = c.execute("SELECT MAX(fetched_at) FROM invoices").fetchone()[0]
+        vm_pur = c.execute("SELECT MAX(fetched_at) FROM purchases_summary").fetchone()[0]
+    vm = max([x for x in (vm_inv, vm_pur) if x], default=None)
+
+    mm = None
+    mm_db = DATA_DIR / "medimarket" / "prices.db"
+    if mm_db.exists():
+        mm = datetime.datetime.fromtimestamp(
+            mm_db.stat().st_mtime
+        ).isoformat(timespec="seconds")
+
+    def _age_days(iso: str | None) -> int | None:
+        if not iso:
+            return None
+        try:
+            d = datetime.datetime.fromisoformat(iso.replace("Z", "").strip())
+        except ValueError:
+            try:
+                d = datetime.datetime.fromisoformat(iso[:19])
+            except ValueError:
+                return None
+        return (datetime.datetime.now() - d).days
+
+    return {
+        "vetmarket": vm,
+        "medimarket": mm,
+        "vetmarket_age_days": _age_days(vm),
+        "medimarket_age_days": _age_days(mm),
     }
