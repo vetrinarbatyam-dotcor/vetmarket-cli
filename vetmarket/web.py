@@ -31,6 +31,24 @@ _AUTH_COOKIE = "vm_auth"
 # code itself isn't sitting readable in the cookie jar.
 _AUTH_TOKEN = hashlib.sha256(f"vetmarket-dash::{DASHBOARD_PIN}".encode()).hexdigest()[:32]
 
+# Brute-force guard: a 6-digit PIN is only 10^6, so throttle /login per client IP.
+# In-memory (single worker) is enough for a one-box internal dashboard.
+import time as _time
+_LOGIN_FAILS: dict[str, list] = {}          # ip -> [timestamps of recent fails]
+_MAX_FAILS = 8                               # allowed fails within the window
+_FAIL_WINDOW = 15 * 60                       # 15 minutes
+
+
+def _rate_limited(ip: str) -> bool:
+    now = _time.time()
+    fails = [t for t in _LOGIN_FAILS.get(ip, []) if now - t < _FAIL_WINDOW]
+    _LOGIN_FAILS[ip] = fails
+    return len(fails) >= _MAX_FAILS
+
+
+def _record_fail(ip: str) -> None:
+    _LOGIN_FAILS.setdefault(ip, []).append(_time.time())
+
 _LOGIN_HTML = """<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>כניסה — Vetmarket Dashboard</title>
@@ -62,15 +80,27 @@ async def _pin_gate(request: Request, call_next):
 
 @app.post("/login")
 async def login(request: Request):
-    # Parse the urlencoded body by hand to avoid a python-multipart dependency.
+    import hmac
     from urllib.parse import parse_qs
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "unknown"))
+    if _rate_limited(ip):
+        return HTMLResponse(
+            _LOGIN_HTML.replace("__ERR__", "יותר מדי נסיונות — נסה שוב בעוד 15 דקות"),
+            status_code=429)
+    # Parse the urlencoded body by hand to avoid a python-multipart dependency.
     body = (await request.body()).decode("utf-8", "ignore")
     pin = (parse_qs(body).get("pin", [""])[0] or "").strip()
-    if pin == DASHBOARD_PIN:
+    # Timing-safe compare so response time doesn't leak the PIN digit-by-digit.
+    if hmac.compare_digest(pin, DASHBOARD_PIN):
+        _LOGIN_FAILS.pop(ip, None)
         resp = RedirectResponse(url="/", status_code=303)
+        # NOTE: no secure=True — served over plain HTTP (nip.io, no TLS). Add it
+        # together with a 301→https redirect once the box has a certificate.
         resp.set_cookie(_AUTH_COOKIE, _AUTH_TOKEN, httponly=True,
                         max_age=60 * 60 * 24 * 30, samesite="lax")
         return resp
+    _record_fail(ip)
     return HTMLResponse(_LOGIN_HTML.replace("__ERR__", "PIN שגוי"), status_code=401)
 
 
