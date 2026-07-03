@@ -244,6 +244,86 @@ def _medimarket_count(q: str = "", category: str | None = None) -> int:
     return n
 
 
+def _pricing_calc_map(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """Batch-fetch saved margin-calculator inputs for a list of (source, item_key)."""
+    if not pairs:
+        return {}
+    conn = db.get_conn()
+    out: dict[tuple[str, str], dict] = {}
+    placeholders = ",".join(["(?,?)"] * len(pairs))
+    flat = [v for pair in pairs for v in pair]
+    rows = conn.execute(
+        f"""SELECT source, item_key, purchase_discount_pct, markup_pct
+            FROM pricing_calc WHERE (source, item_key) IN ({placeholders})""",
+        flat,
+    ).fetchall()
+    conn.close()
+    for r in rows:
+        out[(r["source"], r["item_key"])] = {
+            "purchase_discount_pct": r["purchase_discount_pct"],
+            "markup_pct": r["markup_pct"],
+        }
+    return out
+
+
+def _supplier_catalog_search(q: str = "", supplier_name: str = "",
+                             limit: int = 100, offset: int = 0) -> list[dict]:
+    conn = db.get_conn()
+    where = []
+    params: list = []
+    if q:
+        where.append("(name LIKE ? OR sku LIKE ? OR category LIKE ?)")
+        pat = f"%{q}%"
+        params.extend([pat, pat, pat])
+    if supplier_name:
+        where.append("supplier = ?")
+        params.append(supplier_name)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = conn.execute(
+        f"""SELECT id, supplier, sku, name, category, animal, price_no_vat,
+                   price_with_vat, price_list_date
+            FROM supplier_catalog_items {where_sql}
+            ORDER BY supplier, name
+            LIMIT ? OFFSET ?""",
+        (*params, limit, offset),
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        out.append({
+            "source": "supplier",
+            "supplier": r["supplier"],
+            "item_key": str(r["id"]),
+            "sku": r["sku"],
+            "name": r["name"],
+            "category": r["category"],
+            "animal": r["animal"],
+            "price_no_vat": r["price_no_vat"],
+            "price_with_vat": r["price_with_vat"],
+            "price_list_date": r["price_list_date"],
+        })
+    return out
+
+
+def _supplier_catalog_count(q: str = "", supplier_name: str = "") -> int:
+    conn = db.get_conn()
+    where = []
+    params: list = []
+    if q:
+        where.append("(name LIKE ? OR sku LIKE ? OR category LIKE ?)")
+        pat = f"%{q}%"
+        params.extend([pat, pat, pat])
+    if supplier_name:
+        where.append("supplier = ?")
+        params.append(supplier_name)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    n = conn.execute(
+        f"SELECT COUNT(*) FROM supplier_catalog_items {where_sql}", params
+    ).fetchone()[0]
+    conn.close()
+    return n
+
+
 def _filter_by_ingredient(items: list[dict], ingredient: str) -> list[dict]:
     """Post-filter a list of items by detected active ingredient."""
     if not ingredient:
@@ -506,6 +586,129 @@ def api_stats():
     }
 
 
+@app.get("/api/suppliers/names")
+def api_supplier_names():
+    """Distinct supplier names in supplier_catalog_items, with counts — for the filter dropdown."""
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT supplier, COUNT(*) AS n FROM supplier_catalog_items GROUP BY supplier ORDER BY n DESC"
+    ).fetchall()
+    conn.close()
+    names = [{"name": r["supplier"], "count": r["n"]} for r in rows]
+    names.append({"name": "Vetmarket", "count": _vetmarket_count()})
+    names.append({"name": "Medi-Market", "count": _medimarket_count()})
+    return {"suppliers": names}
+
+
+@app.get("/api/suppliers/search")
+def api_suppliers_search(
+    q: str = Query("", description="Hebrew/English search term"),
+    source: str = Query("all", pattern="^(all|supplier|vetmarket|medimarket)$"),
+    supplier_name: str = Query("", description="Exact supplier filter (only within source=supplier)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+):
+    """Unified product search across the parsed supplier price-lists (Royal Canin,
+    VetLife, Purina Pro Plan, Monge, Beit Erez, Hill's, ...) PLUS Vetmarket and
+    Medi-Market — one search box, one result shape, with saved margin-calculator
+    inputs (purchase discount % / markup %) attached per row.
+    """
+    fetch_cap = 500
+    merged: list[dict] = []
+    # A named supplier only exists within the supplier_catalog_items source, so
+    # filtering by it implies source=supplier regardless of what was requested.
+    if supplier_name:
+        source = "supplier"
+
+    if source in ("all", "supplier"):
+        merged.extend(_supplier_catalog_search(q, supplier_name, limit=fetch_cap, offset=0))
+
+    if source in ("all", "vetmarket"):
+        for r in _vetmarket_search(q, limit=fetch_cap, offset=0):
+            merged.append({
+                "source": "vetmarket",
+                "supplier": "Vetmarket",
+                "item_key": r["sku"],
+                "sku": r["sku"],
+                "name": r["name"],
+                "category": None,
+                "animal": None,
+                "price_no_vat": r.get("price_net"),
+                "price_with_vat": r.get("price_gross"),
+                "price_list_date": r.get("last_date"),
+            })
+
+    if source in ("all", "medimarket"):
+        for r in _medimarket_search(q, limit=fetch_cap, offset=0):
+            cats = r.get("categories")
+            try:
+                cat0 = (json.loads(cats)[0] if cats else None)
+            except Exception:
+                cat0 = None
+            merged.append({
+                "source": "medimarket",
+                "supplier": "Medi-Market",
+                "item_key": r["sku"],
+                "sku": r["sku"],
+                "name": r["name"],
+                "category": cat0,
+                "animal": None,
+                "price_no_vat": r.get("price_net"),
+                "price_with_vat": r.get("price_gross"),
+                "price_list_date": None,
+            })
+
+    merged.sort(key=lambda r: (r["supplier"] or "", r["name"] or ""))
+    total = len(merged)
+    offset = (page - 1) * page_size
+    page_rows = merged[offset:offset + page_size]
+
+    calc = _pricing_calc_map([(r["source"], r["item_key"]) for r in page_rows])
+    for r in page_rows:
+        saved = calc.get((r["source"], r["item_key"]), {})
+        r["purchase_discount_pct"] = saved.get("purchase_discount_pct", 0) or 0
+        r["markup_pct"] = saved.get("markup_pct", 0) or 0
+
+    return {
+        "items": page_rows,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "query": q,
+        "source": source,
+        "supplier_name": supplier_name,
+    }
+
+
+@app.post("/api/suppliers/pricing")
+async def api_save_pricing(request: Request):
+    """Save the margin-calculator inputs (purchase discount % / markup %) for one item."""
+    from datetime import datetime, timezone
+    body = await request.json()
+    src = (body.get("source") or "").strip()
+    item_key = (body.get("item_key") or "").strip()
+    if src not in ("supplier", "vetmarket", "medimarket") or not item_key:
+        return JSONResponse({"detail": "invalid source/item_key"}, status_code=400)
+    try:
+        discount = float(body.get("purchase_discount_pct") or 0)
+        markup = float(body.get("markup_pct") or 0)
+    except (TypeError, ValueError):
+        return JSONResponse({"detail": "discount/markup must be numeric"}, status_code=400)
+    conn = db.get_conn()
+    conn.execute(
+        """INSERT INTO pricing_calc (source, item_key, purchase_discount_pct, markup_pct, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(source, item_key) DO UPDATE SET
+             purchase_discount_pct=excluded.purchase_discount_pct,
+             markup_pct=excluded.markup_pct,
+             updated_at=excluded.updated_at""",
+        (src, item_key, discount, markup, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 # ---------- HTML ----------
 
 @app.get("/", response_class=HTMLResponse)
@@ -514,6 +717,18 @@ def index():
     if not html_path.exists():
         return HTMLResponse(
             "<h1>index.html missing</h1>"
+            "<p>Expected at: {}</p>".format(html_path),
+            status_code=500,
+        )
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/pricelists", response_class=HTMLResponse)
+def pricelists():
+    html_path = STATIC_DIR / "pricelists.html"
+    if not html_path.exists():
+        return HTMLResponse(
+            "<h1>pricelists.html missing</h1>"
             "<p>Expected at: {}</p>".format(html_path),
             status_code=500,
         )

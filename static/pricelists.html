@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מחירוני ספקים — Vetmarket Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --card: #1a2128;
+    --border: #2a3340;
+    --text: #e6e8eb;
+    --muted: #8a92a3;
+    --accent: #4a9eff;
+    --green: #2dd47e;
+    --green-bg: #143a26;
+    --red: #ff5a5a;
+    --red-bg: #3a1414;
+    --yellow: #f5b942;
+    --yellow-bg: #3a2e14;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+                 "Arial Hebrew", "Arial", sans-serif;
+    background: var(--bg); color: var(--text);
+    margin: 0; padding: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 24px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0; font-size: 20px; font-weight: 600;
+    color: var(--accent);
+  }
+  .btn {
+    background: var(--accent); color: white;
+    border: none; padding: 10px 16px; border-radius: 6px;
+    cursor: pointer; font-size: 14px;
+    font-family: inherit;
+  }
+  .btn-secondary {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    text-decoration: none;
+  }
+  .btn-secondary:hover { background: var(--border); }
+  .stats { color: var(--muted); font-size: 13px; }
+
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+
+  .summary-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat .n { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .stat.ok .n { color: var(--green); }
+  .stat.warn .n { color: var(--yellow); }
+  .stat.bad .n { color: var(--red); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color .15s, transform .15s;
+  }
+  .card.clickable:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .card.disabled {
+    opacity: .55;
+    cursor: default;
+  }
+  .card-top {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  }
+  .name { font-size: 16px; font-weight: 700; }
+  .aka { font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 700;
+    padding: 3px 10px; border-radius: 999px;
+    white-space: nowrap;
+    flex: none;
+  }
+  .pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; }
+  .pill.ok { background: var(--green-bg); color: var(--green); }
+  .pill.ok::before { background: var(--green); }
+  .pill.warn { background: var(--yellow-bg); color: var(--yellow); }
+  .pill.warn::before { background: var(--yellow); }
+  .pill.bad { background: var(--red-bg); color: var(--red); }
+  .pill.bad::before { background: var(--red); }
+
+  .date-big {
+    font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums;
+  }
+  .note { font-size: 12.5px; color: var(--muted); }
+  .files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .file-link {
+    font-size: 12px; color: var(--accent);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; text-decoration: none;
+  }
+  .file-link:hover { background: rgba(74,158,255,.12); }
+
+  .sources {
+    margin-top: 8px;
+    font-size: 12.5px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .sources h2 { font-size: 13px; color: var(--text); margin: 0 0 8px; }
+  .sources ul { margin: 0; padding-inline-start: 18px; }
+  .sources li { margin-bottom: 4px; }
+
+  .search-section {
+    border-top: 1px solid var(--border);
+    margin-top: 28px;
+    padding-top: 24px;
+  }
+  .search-section h2 { font-size: 17px; margin: 0 0 14px; }
+  .search-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .search-bar input[type=text] {
+    flex: 1; min-width: 220px;
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  .search-bar select {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  .result-meta { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  table.results { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+  table.results th, table.results td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+  table.results th {
+    background: var(--card); color: var(--muted); font-weight: 600; position: sticky; top: 0;
+  }
+  table.results tbody tr:hover { background: rgba(255,255,255,.03); }
+  table.results input.calc-input {
+    width: 62px; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 6px; border-radius: 5px; font-size: 13px; text-align: center; font-family: inherit;
+  }
+  table.results .computed { color: var(--green); font-variant-numeric: tabular-nums; }
+  table.results .margin-neg { color: var(--red); }
+  .pager { display: flex; gap: 10px; align-items: center; margin-top: 12px; color: var(--muted); font-size: 13px; }
+  .pager button {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  .src-tag {
+    font-size: 11px; padding: 2px 7px; border-radius: 5px; color: var(--muted);
+    border: 1px solid var(--border); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>📋 מחירוני ספקים</h1>
+  <a href="/" class="btn btn-secondary">🐾 לדשבורד Vetmarket</a>
+  <div class="stats">עדכון אחרון: 2026-07-03</div>
+</header>
+
+<main>
+  <div class="summary-strip">
+    <div class="stat ok"><div class="n">3</div><div class="l">מחירונים עדכניים — לחיצה לצפייה</div></div>
+    <div class="stat warn"><div class="n">1</div><div class="l">קיים אך ישן / חלקי</div></div>
+    <div class="stat bad"><div class="n">2</div><div class="l">לא נמצא בשום מקור</div></div>
+  </div>
+
+  <div class="grid">
+
+    <a class="card clickable" href="/static/pricelists/beit-erez-2026-07.pdf" target="_blank" rel="noopener">
+      <div class="card-top">
+        <div><div class="name">בית ארז</div><div class="aka">מילטין גרופ</div></div>
+        <span class="pill ok">עדכני</span>
+      </div>
+      <div class="date-big">יולי 2026</div>
+      <div class="note">Drive · תאריך פנימי מאושר בקובץ. גם ב-Downloads.</div>
+      <div class="files">
+        <span class="file-link">📄 מחירון PDF</span>
+        <a class="file-link" href="/static/pricelists/beit-erez-2026-07.xlsx" onclick="event.stopPropagation()">📊 קובץ Excel</a>
+      </div>
+    </a>
+
+    <a class="card clickable" href="/static/pricelists/royal-canin-2026-05.pdf" target="_blank" rel="noopener">
+      <div class="card-top">
+        <div><div class="name">רויאל קנין</div><div class="aka">Royal Canin</div></div>
+        <span class="pill ok">עדכני</span>
+      </div>
+      <div class="date-big">מאי 2026</div>
+      <div class="note">Downloads · <span dir="ltr" style="unicode-bidi:embed;">VE_PriceList_26_2.pdf</span>. גרסה ישנה יותר (יוני 2024) קיימת בדרייב — לא בשימוש.</div>
+      <div class="files"><span class="file-link">📄 מחירון PDF</span></div>
+    </a>
+
+    <a class="card clickable" href="/static/pricelists/hills-2026-04.pdf" target="_blank" rel="noopener">
+      <div class="card-top">
+        <div><div class="name">הילס</div><div class="aka">Hills</div></div>
+        <span class="pill ok">עדכני</span>
+      </div>
+      <div class="date-big">אפריל 2026</div>
+      <div class="note">Downloads · <span dir="ltr" style="unicode-bidi:embed;">PD_priceList_Apr26.pdf</span>. אין מחירון-ספק עצמאי בדרייב, רק שורות מוטמעות בגיליון פנימי.</div>
+      <div class="files"><span class="file-link">📄 מחירון PDF</span></div>
+    </a>
+
+    <div class="card disabled">
+      <div class="card-top">
+        <div><div class="name">פרופלאן / פורינה</div><div class="aka">Pro Plan · Purina</div></div>
+        <span class="pill warn">חלקי בלבד</span>
+      </div>
+      <div class="date-big">פברואר 2026</div>
+      <div class="note">אין קובץ מחירון עצמאי מהספק — רק שורות בגיליון הפנימי "מחירון_כללי_וטרינרי.xlsx" (Drive). לא נמצא בDownloads או ב-Gmail.</div>
+    </div>
+
+    <div class="card disabled">
+      <div class="card-top">
+        <div><div class="name">כצט / פרמינה</div><div class="aka">KZT · Premina</div></div>
+        <span class="pill bad">לא נמצא</span>
+      </div>
+      <div class="date-big">—</div>
+      <div class="note">אפס התאמות בדרייב, בהורדות, ובחיפוש ה-Gmail שהושלם. יש להשיג ישירות מהספק.</div>
+    </div>
+
+    <div class="card disabled">
+      <div class="card-top">
+        <div><div class="name">ביופט</div><div class="aka">Biopet (מספר מחירונים)</div></div>
+        <span class="pill bad">לא נמצא</span>
+      </div>
+      <div class="date-big">—</div>
+      <div class="note">אפס התאמות בדרייב ובהורדות. ב-Gmail נמצא רק קובץ ישן וחשוד-לא-רלוונטי מ-2022 (ספק אחר) — לא מהימן.</div>
+    </div>
+
+  </div>
+
+  <div class="sources">
+    <h2>מקורות שנסרקו</h2>
+    <ul>
+      <li><strong>Google Drive</strong> — חשבון vetrinarbatyam@gmail.com (rclone), סריקה רקורסיבית מלאה. לחשבון vetcenter85 אין גישת API/rclone נפרדת לדרייב — רק IMAP.</li>
+      <li><strong>Gmail vetcenter85@gmail.com</strong> — חיפוש IMAP; INBOX לפי שולח הושלם (רויאל קנין, ביופט — בעיקר חשבוניות). חיפוש All Mail + חיפוש עברי מלא (X-GM-RAW) לא הושלם — נתקל בעומס תוצאות ונעצר.</li>
+      <li><strong>Downloads מקומי</strong> — סריקה מלאה של כ-1,400 קבצים, כולל בדיקת תאריך פנימי.</li>
+    </ul>
+  </div>
+
+  <div class="search-section">
+    <h2>🔍 חיפוש מוצרים + מחשבון מרווח</h2>
+    <div class="search-bar">
+      <input type="text" id="q" placeholder="חיפוש שם מוצר / מק&quot;ט / קטגוריה...">
+      <select id="sourceFilter">
+        <option value="all">כל המקורות</option>
+        <option value="supplier">מחירוני ספקים בלבד</option>
+        <option value="vetmarket">וטמרקט</option>
+        <option value="medimarket">מדי-מרקט</option>
+      </select>
+      <select id="supplierFilter"><option value="">כל הספקים</option></select>
+    </div>
+    <div class="result-meta" id="resultMeta"></div>
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr>
+            <th>ספק</th>
+            <th>שם מוצר</th>
+            <th>קטגוריה</th>
+            <th>מחיר לפני מע"מ</th>
+            <th>הנחת קנייה %</th>
+            <th>עלות אחרי מע"מ</th>
+            <th>תוספת %</th>
+            <th>מחיר מכירה</th>
+            <th>רווח</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="prevPage">◀ הקודם</button>
+      <span id="pageLabel"></span>
+      <button id="nextPage">הבא ▶</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const VAT = 1.18;
+let state = { q: '', source: 'all', supplier_name: '', page: 1, page_size: 50, total: 0 };
+let saveTimers = {};
+
+function fmt(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function computeRow(row) {
+  const priceNoVat = row.price_no_vat ?? (row.price_with_vat ? row.price_with_vat / VAT : null);
+  const discount = row.purchase_discount_pct || 0;
+  const markup = row.markup_pct || 0;
+  const costAfterDiscount = priceNoVat != null ? priceNoVat * (1 - discount / 100) : null;
+  const costInclVat = costAfterDiscount != null ? costAfterDiscount * VAT : null;
+  const salePrice = costInclVat != null ? costInclVat * (1 + markup / 100) : null;
+  const marginAmount = (salePrice != null && costInclVat != null) ? salePrice - costInclVat : null;
+  const marginPct = (marginAmount != null && salePrice) ? (marginAmount / salePrice * 100) : null;
+  return { priceNoVat, costInclVat, salePrice, marginAmount, marginPct };
+}
+
+async function loadSuppliers() {
+  const r = await fetch('/api/suppliers/names');
+  const d = await r.json();
+  const sel = document.getElementById('supplierFilter');
+  d.suppliers.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = `${s.name} (${s.count})`;
+    sel.appendChild(opt);
+  });
+}
+
+function savePricing(row, discount, markup) {
+  const key = row.source + '::' + row.item_key;
+  clearTimeout(saveTimers[key]);
+  saveTimers[key] = setTimeout(() => {
+    fetch('/api/suppliers/pricing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: row.source, item_key: row.item_key,
+        purchase_discount_pct: discount, markup_pct: markup,
+      }),
+    });
+  }, 500);
+}
+
+function renderRow(row) {
+  const tr = document.createElement('tr');
+  const c = computeRow(row);
+  const marginClass = (c.marginAmount != null && c.marginAmount < 0) ? 'margin-neg computed' : 'computed';
+
+  tr.innerHTML = `
+    <td>${row.supplier || ''} <span class="src-tag">${row.source}</span></td>
+    <td>${row.name || ''}</td>
+    <td>${row.category || ''}</td>
+    <td>${fmt(c.priceNoVat)}</td>
+    <td><input type="number" class="calc-input discount-input" value="${row.purchase_discount_pct || 0}" min="0" max="100" step="0.5"></td>
+    <td class="computed cost-cell">${fmt(c.costInclVat)}</td>
+    <td><input type="number" class="calc-input markup-input" value="${row.markup_pct || 0}" min="-100" max="1000" step="0.5"></td>
+    <td class="computed sale-cell">${fmt(c.salePrice)}</td>
+    <td class="${marginClass} margin-cell">${fmt(c.marginAmount)} ${c.marginPct != null ? '(' + c.marginPct.toFixed(1) + '%)' : ''}</td>
+  `;
+
+  const discountInput = tr.querySelector('.discount-input');
+  const markupInput = tr.querySelector('.markup-input');
+  const costCell = tr.querySelector('.cost-cell');
+  const saleCell = tr.querySelector('.sale-cell');
+  const marginCell = tr.querySelector('.margin-cell');
+
+  function recompute() {
+    row.purchase_discount_pct = parseFloat(discountInput.value) || 0;
+    row.markup_pct = parseFloat(markupInput.value) || 0;
+    const c2 = computeRow(row);
+    costCell.textContent = fmt(c2.costInclVat);
+    saleCell.textContent = fmt(c2.salePrice);
+    marginCell.textContent = fmt(c2.marginAmount) + (c2.marginPct != null ? ` (${c2.marginPct.toFixed(1)}%)` : '');
+    marginCell.className = (c2.marginAmount != null && c2.marginAmount < 0) ? 'margin-neg computed margin-cell' : 'computed margin-cell';
+    savePricing(row, row.purchase_discount_pct, row.markup_pct);
+  }
+  discountInput.addEventListener('input', recompute);
+  markupInput.addEventListener('input', recompute);
+
+  return tr;
+}
+
+async function runSearch() {
+  const params = new URLSearchParams({
+    q: state.q, source: state.source, supplier_name: state.supplier_name,
+    page: state.page, page_size: state.page_size,
+  });
+  const r = await fetch('/api/suppliers/search?' + params.toString());
+  const d = await r.json();
+  state.total = d.total;
+  const tbody = document.getElementById('resultsBody');
+  tbody.innerHTML = '';
+  d.items.forEach(row => tbody.appendChild(renderRow(row)));
+  const totalPages = Math.max(1, Math.ceil(d.total / state.page_size));
+  document.getElementById('pageLabel').textContent = `עמוד ${state.page} מתוך ${totalPages} — סה"כ ${d.total} מוצרים`;
+  document.getElementById('resultMeta').textContent = d.total === 0 ? 'אין תוצאות' : '';
+  document.getElementById('prevPage').disabled = state.page <= 1;
+  document.getElementById('nextPage').disabled = state.page >= totalPages;
+}
+
+let searchDebounce;
+document.getElementById('q').addEventListener('input', (e) => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { state.q = e.target.value; state.page = 1; runSearch(); }, 350);
+});
+document.getElementById('sourceFilter').addEventListener('change', (e) => {
+  state.source = e.target.value; state.page = 1; runSearch();
+});
+document.getElementById('supplierFilter').addEventListener('change', (e) => {
+  state.supplier_name = e.target.value;
+  if (state.supplier_name) state.source = 'supplier';
+  document.getElementById('sourceFilter').value = state.source;
+  state.page = 1; runSearch();
+});
+document.getElementById('prevPage').addEventListener('click', () => { if (state.page > 1) { state.page--; runSearch(); } });
+document.getElementById('nextPage').addEventListener('click', () => { state.page++; runSearch(); });
+
+loadSuppliers();
+runSearch();
+</script>
+</body>
+</html>

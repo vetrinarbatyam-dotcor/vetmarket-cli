@@ -118,6 +118,37 @@ CREATE INDEX IF NOT EXISTS idx_order_items_sku ON order_items(sku);
 CREATE INDEX IF NOT EXISTS idx_prices_sku ON prices(sku);
 CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);
+
+CREATE TABLE IF NOT EXISTS supplier_catalog_items (
+    -- Structured supplier price-list items (Royal Canin, VetLife, Purina, Monge, Beit Erez, Hill's, ...)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier TEXT NOT NULL,
+    sku TEXT,
+    name TEXT NOT NULL,
+    category TEXT,
+    animal TEXT,
+    price_no_vat REAL,
+    price_with_vat REAL,
+    price_list_date TEXT,     -- e.g. '2026-05'
+    source TEXT,              -- where this row came from (file name / clinic-pal-hub table)
+    notes TEXT,
+    imported_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pricing_calc (
+    -- User-entered margin-calculator inputs, keyed per product regardless of which
+    -- source table (supplier_catalog_items / products / medimarket) it came from.
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,     -- 'supplier' | 'vetmarket' | 'medimarket'
+    item_key TEXT NOT NULL,   -- sku if available, else supplier+name
+    purchase_discount_pct REAL DEFAULT 0,
+    markup_pct REAL DEFAULT 0,
+    updated_at TEXT,
+    UNIQUE(source, item_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_catalog_supplier ON supplier_catalog_items(supplier);
+CREATE INDEX IF NOT EXISTS idx_supplier_catalog_name ON supplier_catalog_items(name);
 """
 
 
